@@ -672,7 +672,9 @@ LocalHints =
     # Check for attributes that make an element clickable regardless of its tagName.
     if (element.hasAttribute("onclick") or
         element.getAttribute("role")?.toLowerCase() in ["button", "link"] or
-        element.getAttribute("contentEditable")?.toLowerCase() in ["", "contentEditable", "true"])
+        element.getAttribute("contentEditable")?.toLowerCase() in ["", "contentEditable", "true"] or
+        (document.defaultView.getComputedStyle(element, null).cursor == "pointer" and
+          document.defaultView.getComputedStyle(element.parentElement, null).cursor != "pointer"))
       isClickable = true
 
     # Check for jsaction event listeners on the element.
