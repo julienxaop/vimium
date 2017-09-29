@@ -60,7 +60,8 @@
              "content_scripts/mode_key_handler.js",
              "content_scripts/mode_visual.js",
              "content_scripts/hud.js",
-             "content_scripts/vimium_frontend.js"
+             "content_scripts/vimium_frontend.js",
+             "injected_scripts/hook_addEventListener.js"
             ],
       "css": ["content_scripts/vimium.css"],
       "run_at": "document_start",

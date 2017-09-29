@@ -158,7 +158,7 @@ class LinkHintsMode
 
     # This count is used to rank equal-scoring hints when sorting, thereby making JavaScript's sort stable.
     @stableSortCount = 0
-    @hintMarkers = (@createMarkerFor desc for desc in hintDescriptors)
+    @hintMarkers = (@createMarkerForDesc desc for desc in hintDescriptors)
     @markerMatcher = new (if Settings.get "filterLinkHints" then FilterHints else AlphabetHints)
     @markerMatcher.fillInMarkers @hintMarkers, @.getNextZIndex.bind this
 
@@ -184,6 +184,138 @@ class LinkHintsMode
       id: "vimiumHintMarkerContainer", className: "vimiumReset"
 
     @setIndicator()
+  setOpenLinkMode: (@mode) ->
+    if @mode is OPEN_IN_NEW_BG_TAB or @mode is OPEN_IN_NEW_FG_TAB or @mode is OPEN_WITH_QUEUE
+      if @mode is OPEN_IN_NEW_BG_TAB
+        @hintMode.setIndicator "Open link in new tab."
+      else if @mode is OPEN_IN_NEW_FG_TAB
+        @hintMode.setIndicator "Open link in new tab and switch to it."
+      else
+        @hintMode.setIndicator "Open multiple links in new tabs."
+      @linkActivator = (link) ->
+        # When "clicking" on a link, dispatch the event with the appropriate meta key (CMD on Mac, CTRL on
+        # windows) to open it in a new tab if necessary.
+        DomUtils.simulateClick link,
+          shiftKey: @mode is OPEN_IN_NEW_FG_TAB
+          metaKey: KeyboardUtils.platform == "Mac"
+          ctrlKey: KeyboardUtils.platform != "Mac"
+          altKey: false
+    else if @mode is COPY_LINK_URL
+      @hintMode.setIndicator "Copy link URL to Clipboard."
+      @linkActivator = (link) =>
+        if link.href?
+          chrome.runtime.sendMessage handler: "copyToClipboard", data: link.href
+          url = link.href
+          url = url[0..25] + "...." if 28 < url.length
+          @onExit = -> HUD.showForDuration "Yanked #{url}", 2000
+        else
+          @onExit = -> HUD.showForDuration "No link to yank.", 2000
+    else if @mode is OPEN_INCOGNITO
+      @hintMode.setIndicator "Open link in incognito window."
+      @linkActivator = (link) ->
+        chrome.runtime.sendMessage handler: 'openUrlInIncognito', url: link.href
+    else if @mode is DOWNLOAD_LINK_URL
+      @hintMode.setIndicator "Download link URL."
+      @linkActivator = (link) ->
+        DomUtils.simulateClick link, altKey: true, ctrlKey: false, metaKey: false
+    else # OPEN_IN_CURRENT_TAB
+      @hintMode.setIndicator "Open link in current tab."
+      @linkActivator = DomUtils.simulateClick.bind DomUtils
+
+  #
+  # Creates a link marker for the given link.
+  #
+  createMarkerFor: do ->
+    # This count is used to rank equal-scoring hints when sorting, thereby making JavaScript's sort stable.
+    stableSortCount = 0
+    (link) ->
+      marker = DomUtils.createElement "div"
+      marker.className = "vimiumReset internalVimiumHintMarker vimiumHintMarker"
+      marker.clickableItem = link.element
+      marker.stableSortCount = ++stableSortCount
+
+      clientRect = link.rect
+      marker.style.left = clientRect.left + window.scrollX + "px"
+      marker.style.top = clientRect.top  + window.scrollY  + "px"
+
+      marker.rect = link.rect
+
+      marker
+
+  #
+  # Determine whether the element is visible and clickable. If it is, find the rect bounding the element in
+  # the viewport.  There may be more than one part of element which is clickable (for example, if it's an
+  # image), therefore we always return a array of element/rect pairs (which may also be a singleton or empty).
+  #
+  getVisibleClickable: (element) ->
+    tagName = element.tagName.toLowerCase()
+    isClickable = false
+    onlyHasTabIndex = false
+    visibleElements = []
+
+    # Insert area elements that provide click functionality to an img.
+    if tagName == "img"
+      mapName = element.getAttribute "usemap"
+      if mapName
+        imgClientRects = element.getClientRects()
+        mapName = mapName.replace(/^#/, "").replace("\"", "\\\"")
+        map = document.querySelector "map[name=\"#{mapName}\"]"
+        if map and imgClientRects.length > 0
+          areas = map.getElementsByTagName "area"
+          areasAndRects = DomUtils.getClientRectsForAreas imgClientRects[0], areas
+          visibleElements.push areasAndRects...
+
+    # Check aria properties to see if the element should be ignored.
+    if (element.getAttribute("aria-hidden")?.toLowerCase() in ["", "true"] or
+        element.getAttribute("aria-disabled")?.toLowerCase() in ["", "true"])
+      return [] # This element should never have a link hint.
+
+    # Check for AngularJS listeners on the element.
+    @checkForAngularJs ?= do ->
+      angularElements = document.getElementsByClassName "ng-scope"
+      if angularElements.length == 0
+        -> false
+      else
+        ngAttributes = []
+        for prefix in [ '', 'data-', 'x-' ]
+          for separator in [ '-', ':', '_' ]
+            ngAttributes.push "#{prefix}ng#{separator}click"
+        (element) ->
+          for attribute in ngAttributes
+            return true if element.hasAttribute attribute
+          false
+
+    isClickable ||= @checkForAngularJs element
+
+    # Check for attributes that make an element clickable regardless of its tagName.
+    if (element.hasAttribute("onclick") or
+        element.getAttribute("role")?.toLowerCase() in ["button", "link"] or
+        element.getAttribute("class")?.toLowerCase().indexOf("button") >= 0 or
+        element.getAttribute("contentEditable")?.toLowerCase() in ["", "contentEditable", "true"] or
+        element.vimiumHasOnclick)
+      isClickable = true
+
+    # Check for jsaction event listeners on the element.
+    if element.hasAttribute "jsaction"
+      jsactionRules = element.getAttribute("jsaction").split(";")
+      for jsactionRule in jsactionRules
+        ruleSplit = jsactionRule.split ":"
+        isClickable ||= ruleSplit[0] == "click" or (ruleSplit.length == 1 and ruleSplit[0] != "none")
+
+    # Check for tagNames which are natively clickable.
+    switch tagName
+      when "a"
+        isClickable = true
+      when "textarea"
+        isClickable ||= not element.disabled and not element.readOnly
+      when "input"
+        isClickable ||= not (element.getAttribute("type")?.toLowerCase() == "hidden" or
+                             element.disabled or
+                             (element.readOnly and DomUtils.isSelectable element))
+      when "button", "select"
+        isClickable ||= not element.disabled
+      when "label"
+        isClickable ||= element.control? and (@getVisibleClickable element.control).length == 0
 
   setOpenLinkMode: (@mode, shouldPropagateToOtherFrames = true) ->
     if shouldPropagateToOtherFrames
@@ -206,7 +338,7 @@ class LinkHintsMode
   #
   # Creates a link marker for the given link.
   #
-  createMarkerFor: (desc) ->
+  createMarkerForDesc: (desc) ->
     marker =
       if desc.frameId == frameId
         localHintDescriptor = HintCoordinator.getLocalHintMarker desc
@@ -220,6 +352,42 @@ class LinkHintsMode
           className: "vimiumReset internalVimiumHintMarker vimiumHintMarker"
           showLinkText: localHintDescriptor.showLinkText
           localHintDescriptor: localHintDescriptor
+  getVisibleClickableElements: ->
+    elements = document.getElementsByTagName "*"
+    visibleElements = []
+
+    # The order of elements here is important; they should appear in the order they are in the DOM, so that
+    # we can work out which element is on top when multiple elements overlap. Detecting elements in this loop
+    # is the sensible, efficient way to ensure this happens.
+    # NOTE(mrmr1993): Our previous method (combined XPath and DOM traversal for jsaction) couldn't provide
+    # this, so it's necessary to check whether elements are clickable in order, as we do below.
+    for element in elements
+      visibleElement = @getVisibleClickable element
+      visibleElements.push visibleElement...
+
+    # TODO(mrmr1993): Consider z-index. z-index affects behviour as follows:
+    #  * The document has a local stacking context.
+    #  * An element with z-index specified
+    #    - sets its z-order position in the containing stacking context, and
+    #    - creates a local stacking context containing its children.
+    #  * An element (1) is shown above another element (2) if either
+    #    - in the last stacking context which contains both an ancestor of (1) and an ancestor of (2), the
+    #      ancestor of (1) has a higher z-index than the ancestor of (2); or
+    #    - in the last stacking context which contains both an ancestor of (1) and an ancestor of (2),
+    #        + the ancestors of (1) and (2) have equal z-index, and
+    #        + the ancestor of (1) appears later in the DOM than the ancestor of (2).
+    #
+    # Remove rects from elements where another clickable element lies above it.
+    nonOverlappingElements = []
+    # Traverse the DOM from first to last, since later elements show above earlier elements.
+    visibleElements = visibleElements.reverse()
+    while visibleElement = visibleElements.pop()
+      rects = [visibleElement.rect]
+      for {rect: negativeRect} in visibleElements
+        # Subtract negativeRect from every rect in rects, and concatenate the arrays of rects that result.
+        rects = [].concat (rects.map (rect) -> Rect.subtract rect, negativeRect)...
+      if rects.length > 0
+        nonOverlappingElements.push {element: visibleElement.element, rect: rects[0]}
       else
         {}
 
@@ -892,6 +1060,26 @@ class WaitForEnter extends Mode
         else if KeyboardUtils.isEscape event
           @exit()
           callback false # false -> isSuccess.
+
+# TODO(mrmr1993): Use event.deepPath to traverse into shadow DOMs, as part of a solution to #1861. This
+# requires Chromium 531990.
+markTargetClickable = (event) ->
+  event.target.vimiumHasOnclick = true
+  false
+
+# Handlers to allow the injected addEventListener hook to send detatched DOM nodes.
+# NOTE(mrmr1993): We communicate DOM nodes as the target of events, since there is no other obvious way to
+# inform content scripts about them from the main page context.
+handlerStack.push
+  "VimiumRegistrationElementEvent": (event) ->
+    registrationElement = event.target
+    registrationElement.addEventListener "VimiumRegistrationElementEvent-onclick", markTargetClickable, true
+    @stopBubblingAndFalse
+
+  "VimiumRegistrationElementEvent-onclick": markTargetClickable
+
+for type in ["VimiumRegistrationElementEvent", "VimiumRegistrationElementEvent-onclick"]
+  do (type) -> window.addEventListener type, ((event) -> handlerStack.bubbleEvent type, event), true
 
 root = exports ? window
 root.LinkHints = LinkHints
