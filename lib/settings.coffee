@@ -202,7 +202,7 @@ Settings.init()
 
 # Perform migration from old settings versions, if this is the background page.
 if Utils.isBackgroundPage()
-  Settings.onLoaded ->
+  Settings.applyMigrations = ->
     unless Settings.get "settingsVersion"
       # This is a new install.  For some settings, we retain a legacy default behaviour for existing users but
       # use a non-default behaviour for new users.
@@ -218,5 +218,8 @@ if Utils.isBackgroundPage()
     # be removed after 1.58 has been out for sufficiently long.
     Settings.nuke "copyNonDefaultsToChromeStorage-20150717"
 
-root = exports ? window
+  Settings.onLoaded Settings.applyMigrations.bind Settings
+
+root = exports ? (window.root ?= {})
 root.Settings = Settings
+extend window, root unless exports?

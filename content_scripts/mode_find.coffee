@@ -6,7 +6,7 @@ class SuppressPrintable extends Mode
   constructor: (options) ->
     super options
     handler = (event) => if KeyboardUtils.isPrintable event then @suppressEvent else @continueBubbling
-    type = document.getSelection().type
+    type = DomUtils.getSelectionType()
 
     # We use unshift here, so we see events after normal mode, so we only see unmapped keys.
     @unshift
@@ -16,7 +16,7 @@ class SuppressPrintable extends Mode
       keyup: (event) =>
         # If the selection type has changed (usually, no longer "Range"), then the user is interacting with
         # the input element, so we get out of the way.  See discussion of option 5c from #1415.
-        if document.getSelection().type != type then @exit() else handler event
+        @exit() if DomUtils.getSelectionType() != type
 
 # When we use find, the selection/focus can land in a focusable/editable element.  In this situation, special
 # considerations apply.  We implement three special cases:
@@ -48,7 +48,7 @@ class PostFindMode extends SuppressPrintable
       keydown: (event) =>
         if KeyboardUtils.isEscape event
           @exit()
-          DomUtils.consumeKeyup event
+          @suppressEvent
         else
           handlerStack.remove()
           @continueBubbling
@@ -79,9 +79,10 @@ class FindMode extends Mode
 
   exit: (event) ->
     super()
-    handleEscapeForFindMode() if event
+    FindMode.handleEscape() if event
 
   restoreSelection: ->
+    return unless @initialRange
     range = @initialRange
     selection = getSelection()
     selection.removeAllRanges()
@@ -201,20 +202,71 @@ class FindMode extends Mode
 
   @restoreDefaultSelectionHighlight: forTrusted -> document.body.classList.remove("vimiumFindMode")
 
+  # The user has found what they're looking for and is finished searching. We enter insert mode, if possible.
+  @handleEscape: ->
+    document.body.classList.remove("vimiumFindMode")
+    # Removing the class does not re-color existing selections. we recreate the current selection so it reverts
+    # back to the default color.
+    selection = window.getSelection()
+    unless selection.isCollapsed
+      range = window.getSelection().getRangeAt(0)
+      window.getSelection().removeAllRanges()
+      window.getSelection().addRange(range)
+    focusFoundLink() || selectFoundInputElement()
+
+  # Save the query so the user can do further searches with it.
+  @handleEnter: ->
+    focusFoundLink()
+    document.body.classList.add("vimiumFindMode")
+    FindMode.saveQuery()
+
+  @findNext: (backwards) ->
+    Marks.setPreviousPosition()
+    FindMode.query.hasResults = FindMode.execute null, {backwards}
+
+    if FindMode.query.hasResults
+      focusFoundLink()
+      new PostFindMode()
+    else
+      HUD.showForDuration("No matches for '#{FindMode.query.rawQuery}'", 1000)
+
   checkReturnToViewPort: ->
     window.scrollTo @scrollX, @scrollY if @options.returnToViewport
 
 getCurrentRange = ->
   selection = getSelection()
-  if selection.type == "None"
+  if DomUtils.getSelectionType(selection) == "None"
     range = document.createRange()
     range.setStart document.body, 0
     range.setEnd document.body, 0
     range
   else
-    selection.collapseToStart() if selection.type == "Range"
+    selection.collapseToStart() if DomUtils.getSelectionType(selection) == "Range"
     selection.getRangeAt 0
 
-root = exports ? window
+getLinkFromSelection = ->
+  node = window.getSelection().anchorNode
+  while (node && node != document.body)
+    return node if (node.nodeName.toLowerCase() == "a")
+    node = node.parentNode
+  null
+
+focusFoundLink = ->
+  if (FindMode.query.hasResults)
+    link = getLinkFromSelection()
+    link.focus() if link
+
+selectFoundInputElement = ->
+  # Since the last focused element might not be the one currently pointed to by find (e.g.  the current one
+  # might be disabled and therefore unable to receive focus), we use the approximate heuristic of checking
+  # that the last anchor node is an ancestor of our element.
+  findModeAnchorNode = document.getSelection().anchorNode
+  if (FindMode.query.hasResults && document.activeElement &&
+      DomUtils.isSelectable(document.activeElement) &&
+      DomUtils.isDOMDescendant(findModeAnchorNode, document.activeElement))
+    DomUtils.simulateSelect(document.activeElement)
+
+root = exports ? (window.root ?= {})
 root.PostFindMode = PostFindMode
 root.FindMode = FindMode
+extend window, root unless exports?

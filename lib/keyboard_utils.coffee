@@ -5,7 +5,7 @@ Utils?.monitorChromeStorage "mapKeyRegistry", (value) => mapKeyRegistry = value
 KeyboardUtils =
   # This maps event.key key names to Vimium key names.
   keyNames:
-    "ArrowLeft": "left", "ArrowUp": "up", "ArrowRight": "right", "ArrowDown": "down", " ": "space", "Backspace": "backspace"
+    "ArrowLeft": "left", "ArrowUp": "up", "ArrowRight": "right", "ArrowDown": "down", " ": "space"
 
   init: ->
     if (navigator.userAgent.indexOf("Mac") != -1)
@@ -18,6 +18,8 @@ KeyboardUtils =
   getKeyChar: (event) ->
     unless Settings.get "ignoreKeyboardLayout"
       key = event.key
+    else unless event.code
+      key = ""
     else if event.code[...6] == "Numpad"
       # We cannot correctly emulate the numpad, so fall back to event.key; see #2626.
       key = event.key
@@ -31,19 +33,17 @@ KeyboardUtils =
       else if key.length == 1 and not event.shiftKey
         key = key.toLowerCase()
 
-    if key of @keyNames
-      @keyNames[key]
     # It appears that key is not always defined (see #2453).
-    else if not key?
+    unless key
       ""
+    else if key of @keyNames
+      @keyNames[key]
+    else if @isModifier event
+      "" # Don't resolve modifier keys.
     else if key.length == 1
       key
-    else if key.length == 2 and "F1" <= key <= "F9"
-      key.toLowerCase() # F1 to F9.
-    else if key.length == 3 and "F10" <= key <= "F12"
-      key.toLowerCase() # F10 to F12.
     else
-      ""
+      key.toLowerCase()
 
   getKeyCharString: (event) ->
     if keyChar = @getKeyChar event
@@ -60,15 +60,22 @@ KeyboardUtils =
       keyChar = mapKeyRegistry[keyChar] ? keyChar
       keyChar
 
-  isEscape: (event) ->
-    # <c-[> is mapped to Escape in Vim by default.
-    event.key == "Escape" || @getKeyCharString(event) == "<c-[>"
+  isEscape: do ->
+    useVimLikeEscape = true
+    Utils.monitorChromeStorage "useVimLikeEscape", (value) -> useVimLikeEscape = value
+
+    (event) ->
+      # <c-[> is mapped to Escape in Vim by default.
+      event.key == "Escape" or (useVimLikeEscape and @getKeyCharString(event) == "<c-[>")
 
   isBackspace: (event) ->
     event.key in ["Backspace", "Delete"]
 
   isPrintable: (event) ->
     @getKeyCharString(event)?.length == 1
+
+  isModifier: (event) ->
+    event.key in ["Control", "Shift", "Alt", "OS", "AltGraph", "Meta"]
 
   enUsTranslations:
     "Backquote":     ["`", "~"]
@@ -97,5 +104,6 @@ KeyboardUtils =
 
 KeyboardUtils.init()
 
-root = exports ? window
+root = exports ? (window.root ?= {})
 root.KeyboardUtils = KeyboardUtils
+extend window, root unless exports?

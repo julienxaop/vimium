@@ -12,6 +12,9 @@ setTextInInputElement = (inputElement, text) ->
   selection.removeAllRanges()
   selection.addRange range
 
+document.addEventListener "DOMContentLoaded", ->
+  DomUtils.injectUserCss() # Manually inject custom user styles.
+
 document.addEventListener "keydown", (event) ->
   inputElement = document.getElementById "hud-find-input"
   return unless inputElement? # Don't do anything if we're not in find mode.
@@ -91,6 +94,20 @@ handlers =
     else
       " (No matches)"
     countElement.textContent = if showMatchText then countText else ""
+
+  copyToClipboard: (data) ->
+    focusedElement = document.activeElement
+    Clipboard.copy data
+    focusedElement?.focus()
+    window.parent.focus()
+    UIComponentServer.postMessage {name: "unfocusIfFocused"}
+
+  pasteFromClipboard: ->
+    focusedElement = document.activeElement
+    data = Clipboard.paste()
+    focusedElement?.focus()
+    window.parent.focus()
+    UIComponentServer.postMessage {name: "pasteResponse", data}
 
 UIComponentServer.registerHandler ({data}) -> handlers[data.name ? data]? data
 FindModeHistory.init()

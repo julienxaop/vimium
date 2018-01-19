@@ -75,7 +75,24 @@ task "package", "Builds a zip file for submission to the Chrome store. The outpu
     blacklist.map((item) -> ["--exclude", "#{item}"]))
 
   spawn "rsync", rsyncOptions, false, true
-  spawn "zip", ["-r", "dist/vimium-#{vimium_version}.zip", "dist/vimium"], false, true
+
+  distManifest = "dist/vimium/manifest.json"
+  manifest = JSON.parse fs.readFileSync(distManifest).toString()
+
+  # Build the Chrome Store package; this does not require the clipboardWrite permission.
+  manifest.permissions = (permission for permission in manifest.permissions when permission != "clipboardWrite")
+  fs.writeFileSync distManifest, JSON.stringify manifest, null, 2
+  spawn "zip", ["-r", "dist/vimium-chrome-store-#{vimium_version}.zip", "dist/vimium"], false, true
+
+  # Build the Chrome Store dev package.
+  manifest.name = "Vimium Canary"
+  manifest.description = "This is the development branch of Vimium (it is beta software)."
+  fs.writeFileSync distManifest, JSON.stringify manifest, null, 2
+  spawn "zip", ["-r", "dist/vimium-canary-#{vimium_version}.zip", "dist/vimium"], false, true
+
+  # Build Firefox release.
+  spawn "zip", "-r -FS dist/vimium-ff-#{vimium_version}.zip background_scripts Cakefile content_scripts CONTRIBUTING.md CREDITS icons lib
+                manifest.json MIT-LICENSE.txt pages README.md -x *.coffee -x Cakefile -x CREDITS -x *.md".split(/\s+/), false, true
 
 # This builds a CRX that's distributable outside of the Chrome web store. Is this used by folks who fork
 # Vimium and want to distribute their fork?
@@ -157,8 +174,3 @@ task "coverage", "generate coverage report", ->
           source: (Utils.escapeHtml fs.readFileSync fname, 'utf-8').split '\n'
 
       fs.writeFileSync 'jscoverage.json', JSON.stringify(result)
-
-task "zip", "build Firefox zip file in ../vimium.zip", ->
-  spawn "zip", "-r -FS ../vimium.zip background_scripts Cakefile content_scripts CONTRIBUTING.md CREDITS icons lib
-                manifest.json MIT-LICENSE.txt pages README.md -x *.coffee -x Cakefile -x CREDITS -x *.md".split /\s+/
-

@@ -83,7 +83,7 @@ HelpDialog =
               commandNameElement.textContent = command.command
               commandNameElement.title = "Click to copy \"#{command.command}\" to clipboard."
               commandNameElement.addEventListener "click", ->
-                chrome.runtime.sendMessage handler: "copyToClipboard", data: commandNameElement.textContent
+                HUD.copyToClipboard commandNameElement.textContent
                 HUD.showForDuration("Yanked #{commandNameElement.textContent}.", 2000)
 
       @showAdvancedCommands(@getShowAdvancedCommands())
@@ -130,6 +130,9 @@ UIComponentServer.registerHandler (event) ->
       Frame.postMessage "unregisterFrame"
       # Abandon any HUD which might be showing within the help dialog.
       HUD.abandon()
+
+document.addEventListener "DOMContentLoaded", ->
+  DomUtils.injectUserCss() # Manually inject custom user styles.
 
 root = exports ? window
 root.HelpDialog = HelpDialog
