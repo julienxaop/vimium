@@ -219,7 +219,7 @@ DomUtils =
       node = selection.anchorNode
       node and @isDOMDescendant element, node
     else
-      if selection.type == "Range" and selection.isCollapsed
+      if DomUtils.getSelectionType(selection) == "Range" and selection.isCollapsed
 	      # The selection is inside the Shadow DOM of a node. We can check the node it registers as being
 	      # before, since this represents the node whose Shadow DOM it's inside.
         containerNode = selection.anchorNode.childNodes[selection.anchorOffset]
@@ -250,7 +250,7 @@ DomUtils =
     eventSequence = ["mouseover", "mousedown", "mouseup", "click"]
     for event in eventSequence
       defaultActionShouldTrigger = @simulateMouseEvent event, element, modifiers
-      if event == "click" and defaultActionShouldTrigger and Utils.isFirefox()
+      if event == "click" and defaultActionShouldTrigger and Utils.isFirefox() and element.target != "_blank"
         # Firefox doesn't (currently) trigger the default action for modified keys.
         DomUtils.simulateClickDefaultAction element, modifiers
       defaultActionShouldTrigger # return the values returned by each @simulateMouseEvent call.
@@ -276,8 +276,7 @@ DomUtils =
       # but Webkit will. Dispatching a click on an input box does not seem to focus it; we do that separately
       element.dispatchEvent(mouseEvent)
 
-  simulateClickDefaultAction: (element, modifiers) ->
-    return unless modifiers?
+  simulateClickDefaultAction: (element, modifiers = {}) ->
     return unless element.tagName?.toLowerCase() == "a" and element.href?
 
     {ctrlKey, shiftKey, metaKey, altKey} = modifiers
@@ -295,6 +294,8 @@ DomUtils =
     else if shiftKey == true and metaKey == false and ctrlKey == false and altKey == false
       # Open in new window.
       chrome.runtime.sendMessage {handler: "openUrlInNewWindow", url: element.href}
+    else if element.target == "_blank"
+      chrome.runtime.sendMessage {handler: "openUrlInNewTab", url: element.href, active: true}
 
     return
 
@@ -343,7 +344,7 @@ DomUtils =
   consumeKeyup: do ->
     handlerId = null
 
-    (event, callback = null) ->
+    (event, callback = null, suppressPropagation) ->
       unless event.repeat
         handlerStack.remove handlerId if handlerId?
         code = event.code
@@ -352,17 +353,25 @@ DomUtils =
           keyup: (event) ->
             return handlerStack.continueBubbling unless event.code == code
             @remove()
-            handlerStack.suppressEvent
+            if suppressPropagation
+              DomUtils.suppressPropagation event
+            else
+              DomUtils.suppressEvent event
+            handlerStack.continueBubbling
           # We cannot track keyup events if we lose the focus.
           blur: (event) ->
             @remove() if event.target == window
             handlerStack.continueBubbling
       callback?()
-      @suppressEvent event
-      handlerStack.suppressEvent
+      if suppressPropagation
+        DomUtils.suppressPropagation event
+        handlerStack.suppressPropagation
+      else
+        DomUtils.suppressEvent event
+        handlerStack.suppressEvent
 
   # Polyfill for selection.type (which is not available in Firefox).
-  getSelectionType: (selection) ->
+  getSelectionType: (selection = document.getSelection()) ->
     selection.type or do ->
       if selection.rangeCount == 0
         "None"
@@ -375,7 +384,7 @@ DomUtils =
   # This finds the element containing the selection focus.
   getElementWithFocus: (selection, backwards) ->
     r = t = selection.getRangeAt 0
-    if selection.type == "Range"
+    if DomUtils.getSelectionType(selection) == "Range"
       r = t.cloneRange()
       r.collapse backwards
     t = r.startContainer
@@ -407,5 +416,14 @@ DomUtils =
   windowIsTooSmall: ->
     return window.innerWidth < 3 or window.innerHeight < 3
 
-root = exports ? window
+  # Inject user styles manually. This is only necessary for our chrome-extension:// pages and frames.
+  injectUserCss: ->
+    Settings.onLoaded ->
+      style = document.createElement "style"
+      style.type = "text/css"
+      style.textContent = Settings.get "userDefinedLinkHintCss"
+      document.head.appendChild style
+
+root = exports ? (window.root ?= {})
 root.DomUtils = DomUtils
+extend window, root unless exports?

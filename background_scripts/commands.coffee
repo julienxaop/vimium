@@ -20,7 +20,7 @@ Commands =
     unmapAll = false
     for line in configLines.reverse()
       tokens = line.split /\s+/
-      switch tokens[0]
+      switch tokens[0].toLowerCase()
         when "map"
           if 3 <= tokens.length and not unmapAll
             [_, key, command, optionList...] = tokens
@@ -32,7 +32,7 @@ Commands =
         when "unmap"
           if tokens.length == 2
             seen[tokens[1]] = true
-        when "unmapAll"
+        when "unmapall"
           unmapAll = true
         when "mapkey"
           if tokens.length == 3
@@ -113,6 +113,9 @@ Commands =
           # We don't need these properties in the content scripts.
           delete currentMapping[key][prop] for prop in ["keySequence", "description"]
     chrome.storage.local.set normalModeKeyStateMapping: keyStateMapping
+    # Inform `KeyboardUtils.isEscape()` whether `<c-[>` should be interpreted as `Escape` (which it is by
+    # default).
+    chrome.storage.local.set useVimLikeEscape: "<c-[>" not of keyStateMapping
 
   # Build the "helpPageData" data structure which the help page needs and place it in Chrome storage.
   prepareHelpPageData: ->
@@ -337,8 +340,8 @@ commandDescriptions =
   toggleViewSource: ["View page source", { noRepeat: true }]
 
   copyCurrentUrl: ["Copy the current URL to the clipboard", { noRepeat: true }]
-  openCopiedUrlInCurrentTab: ["Open the clipboard's URL in the current tab", { background: true, noRepeat: true }]
-  openCopiedUrlInNewTab: ["Open the clipboard's URL in a new tab", { background: true, repeatLimit: 20 }]
+  openCopiedUrlInCurrentTab: ["Open the clipboard's URL in the current tab", { noRepeat: true }]
+  openCopiedUrlInNewTab: ["Open the clipboard's URL in a new tab", { repeatLimit: 20 }]
 
   enterInsertMode: ["Enter insert mode", { noRepeat: true }]
   passNextKey: ["Pass the next key to the page"]

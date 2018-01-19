@@ -20,6 +20,7 @@
     <script src="../content_scripts/mode_key_handler.js"></script>
     <script src="../content_scripts/mode_visual.js"></script>
     <script src="../content_scripts/hud.js"></script>
+    <script src="../content_scripts/mode_normal.js"></script>
     <script src="../content_scripts/vimium_frontend.js"></script>
     <link rel="stylesheet" type="text/css" href="../content_scripts/vimium.css" />
 
@@ -66,7 +67,7 @@ unmapAll
                 <a href="#" id="showCommands">Show available commands</a>.
               </div>
             </div>
-            <textarea id="keyMappings" type="text"></textarea>
+            <textarea id="keyMappings" type="text" tabIndex="1"></textarea>
           </td>
         </tr>
         <tr>
@@ -115,11 +116,11 @@ b: http://b.com/?q=%s description
             </td>
           </tr>
           <tr id="linkHintNumbersContainer">
-            <td class="caption">Numbers used<br/> for link hints</td>
+            <td class="caption">Characters used<br/> for link hints</td>
             <td verticalAlign="top">
                 <div class="help">
                   <div class="example">
-                    The numbers placed next to each link after typing "f" to enter link-hint mode.
+                    The characters placed next to each link after typing "f" to enter link-hint mode.
                   </div>
                 </div>
                 <input id="linkHintNumbers" type="text" />
@@ -145,7 +146,7 @@ b: http://b.com/?q=%s description
               </div>
               <label>
                 <input id="filterLinkHints" type="checkbox"/>
-                Use the link's name and numbers for link-hint filtering
+                Use the link's name and characters for link-hint filtering
               </label>
             </td>
           </tr>
@@ -202,7 +203,7 @@ b: http://b.com/?q=%s description
               </div>
               <label>
                 <input id="regexFindMode" type="checkbox"/>
-                Treat find queries as regular expressions
+                Treat find queries as JavaScript regular expressions
               </label>
             </td>
           </tr>
@@ -271,11 +272,12 @@ b: http://b.com/?q=%s description
             </td>
           </tr>
           <tr>
-            <td class="caption">CSS for link hints</td>
+            <td class="caption">CSS for Vimium UI</td>
             <td verticalAlign="top">
               <div class="help">
                 <div class="example">
-                  The CSS used to style the characters next to each link hint.<br/><br/>
+                  These styles are applied to link hints, the Vomnibar, the help dialog, the exclusions pop-up and the HUD.<br />
+                  By default, this CSS is used to style the characters next to each link hint.<br/><br/>
                   These styles are used in addition to and take precedence over Vimium's
                   default styles.
                 </div>
@@ -314,6 +316,33 @@ b: http://b.com/?q=%s description
             </td>
           </tr>
           -->
+        </tbody>
+        <tbody id='backupAndRestore'>
+          <tr>
+            <td colspan="2"><header>Backup and Restore</header></td>
+          </tr>
+          <tr>
+            <td class="caption">Backup</td>
+            <td>
+                <div class="help">
+                  <div class="example">
+                    Click to backup your settings, or right-click and select <i>Save As</i>.
+                  </div>
+                </div>
+              <a id="backupLink" download="vimium-options.json">Click to download backup</a>
+            </td>
+          </tr>
+          <tr>
+            <td class="caption">Restore</td>
+            <td>
+                <div class="help">
+                  <div class="example">
+                    Choose a backup file to restore, then click <i>Save Changes</i>, below, to confirm.
+                  </div>
+                </div>
+              <input id="chooseFile" type="file" accept=".json" style="width: 200px;"/>
+            </td>
+          </tr>
         </tbody>
       </table>
     </div>

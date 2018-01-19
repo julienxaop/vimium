@@ -6,14 +6,22 @@ window.forTrusted ?= (handler) -> (event) ->
   else
     true
 
+browserInfo = browser?.runtime?.getBrowserInfo?()
+
 Utils =
   isFirefox: do ->
     # NOTE(mrmr1993): This test only works in the background page, this is overwritten by isEnabledForUrl for
     # content scripts.
     isFirefox = false
-    browser?.runtime?.getBrowserInfo?()?.then? (browserInfo) ->
+    browserInfo?.then? (browserInfo) ->
       isFirefox = browserInfo?.name == "Firefox"
     -> isFirefox
+  firefoxVersion: do ->
+    # NOTE(mrmr1993): This only works in the background page.
+    ffVersion = undefined
+    browserInfo?.then? (browserInfo) ->
+      ffVersion = browserInfo?.version
+    -> ffVersion
   getCurrentVersion: ->
     chrome.runtime.getManifest().version
 
@@ -23,14 +31,6 @@ Utils =
 
   # Returns true whenever the current page is the extension's background page.
   isBackgroundPage: -> @isExtensionPage() and chrome.extension.getBackgroundPage?() == window
-
-  # Takes a dot-notation object string and calls the function that it points to with the correct value for
-  # 'this'.
-  invokeCommandString: (str, args...) ->
-    [names..., name] = str.split '.'
-    obj = window
-    obj = obj[component] for component in names
-    obj[name].apply obj, args
 
   # Escape all special characters, so RegExp will parse the string 'as is'.
   # Taken from http://stackoverflow.com/questions/3446170/escape-string-for-use-in-javascript-regex
@@ -327,8 +327,11 @@ class JobRunner
   onReady: (callback) ->
     @fetcher.use callback
 
-root = exports ? window
+root = exports ? (window.root ?= {})
 root.Utils = Utils
 root.SimpleCache = SimpleCache
 root.AsyncDataFetcher = AsyncDataFetcher
 root.JobRunner = JobRunner
+unless exports?
+  root.extend = extend
+  extend window, root

@@ -48,7 +48,7 @@ class Google extends GoogleXMLBaseEngine
   constructor: () ->
     super
       engineUrl: "https://suggestqueries.google.com/complete/search?ss_protocol=legace&client=toolbar&q=%s"
-      regexps: "^https?://[a-z]+\\.google\\.(com|ie|co\\.uk|ca|com\\.au)/"
+      regexps: "^https?://[a-z]+\\.google\\.(com|ie|co\\.(uk|jp)|ca|com\\.au)/"
       example:
         searchUrl: "https://www.google.com/search?q=%s"
         keyword: "g"
@@ -58,7 +58,7 @@ class GoogleMaps extends GoogleXMLBaseEngine
   constructor: () ->
     super
       engineUrl: "https://suggestqueries.google.com/complete/search?ss_protocol=legace&client=toolbar&q=#{@prefix.split(' ').join '+'}%s"
-      regexps: "^https?://[a-z]+\\.google\\.(com|ie|co\\.uk|ca|com\\.au)/maps"
+      regexps: "^https?://[a-z]+\\.google\\.(com|ie|co\\.(uk|jp)|ca|com\\.au)/maps"
       example:
         searchUrl: "https://www.google.com/maps?q=%s"
         keyword: "m"
@@ -116,6 +116,17 @@ class Amazon extends BaseEngine
 
   parse: (xhr) -> JSON.parse(xhr.responseText)[1]
 
+class AmazonJapan extends BaseEngine
+  constructor: ->
+    super
+      engineUrl: "https://completion.amazon.co.jp/search/complete?method=completion&search-alias=aps&client=amazon-search-ui&mkt=6&q=%s"
+      regexps: "^https?://www\\.amazon\\.co\\.jp/(s/|gp/search)"
+      example:
+        searchUrl: "https://www.amazon.co.jp/s/?field-keywords=%s"
+        keyword: "aj"
+
+  parse: (xhr) -> JSON.parse(xhr.responseText)[1]
+
 class DuckDuckGo extends BaseEngine
   constructor: ->
     super
@@ -152,6 +163,17 @@ class Qwant extends BaseEngine
   parse: (xhr) ->
     suggestion.value for suggestion in JSON.parse(xhr.responseText).data.items
 
+class UpToDate extends BaseEngine
+  constructor: ->
+    super
+      engineUrl: "https://www.uptodate.com/services/app/contents/search/autocomplete/json?term=%s&limit=10"
+      regexps: "^https?://www\\.uptodate\\.com/"
+      example:
+        searchUrl: "https://www.uptodate.com/contents/search?search=%s&searchType=PLAIN_TEXT&source=USER_INPUT&searchControl=TOP_PULLDOWN&autoComplete=false"
+        keyword: "upto"
+
+  parse: (xhr) -> JSON.parse(xhr.responseText).data.searchTerms
+
 # A dummy search engine which is guaranteed to match any search URL, but never produces completions.  This
 # allows the rest of the logic to be written knowing that there will always be a completion engine match.
 class DummyCompletionEngine extends BaseEngine
@@ -169,8 +191,10 @@ CompletionEngines = [
   Wikipedia
   Bing
   Amazon
+  AmazonJapan
   Webster
   Qwant
+  UpToDate
   DummyCompletionEngine
 ]
 
