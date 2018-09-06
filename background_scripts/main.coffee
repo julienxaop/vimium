@@ -125,7 +125,7 @@ TabOperations =
       active: true
     winConfig.active = request.active if request.active?
     # Firefox does not support "about:newtab" in chrome.tabs.create.
-    delete tabConfig["url"] if tabConfig["url"] == Settings.defaults.newTabUrl
+    delete winConfig["url"] if winConfig["url"] == Settings.defaults.newTabUrl
     chrome.windows.create winConfig, callback
 
 toggleMuteTab = do ->
@@ -193,7 +193,6 @@ BackgroundCommands =
     if request.registryEntry.options.incognito or request.registryEntry.options.window
       windowConfig =
         url: request.urls
-        focused: true
         incognito: request.registryEntry.options.incognito ? false
       chrome.windows.create windowConfig, -> callback request
     else
@@ -216,13 +215,9 @@ BackgroundCommands =
   previousTab: (request) -> selectTab "previous", request
   firstTab: (request) -> selectTab "first", request
   lastTab: (request) -> selectTab "last", request
-  removeTab: ({count, tab}) ->
-    chrome.tabs.query {currentWindow: true}, (tabs) ->
-      activeTabIndex = tab.index
-      startTabIndex = Math.max 0, Math.min activeTabIndex, tabs.length - count
-      chrome.tabs.remove (tab.id for tab in tabs[startTabIndex...startTabIndex + count])
+  removeTab: ({count, tab}) -> forCountTabs count, tab, (tab) -> chrome.tabs.remove tab.id
   restoreTab: mkRepeatCommand (request, callback) -> chrome.sessions.restore null, callback request
-  togglePinTab: ({tab}) -> chrome.tabs.update tab.id, {pinned: !tab.pinned}
+  togglePinTab: ({count, tab}) -> forCountTabs count, tab, (tab) -> chrome.tabs.update tab.id, {pinned: !tab.pinned}
   toggleMuteTab: toggleMuteTab
   moveTabLeft: moveTab
   moveTabRight: moveTab
@@ -236,6 +231,21 @@ BackgroundCommands =
     tabIds = BgUtils.tabRecency.getTabsByRecency().filter (tabId) -> tabId != tab.id
     if 0 < tabIds.length
       selectSpecificTab id: tabIds[(count-1) % tabIds.length]
+  reload: ({count, tabId, registryEntry, tab: {windowId}})->
+    bypassCache = registryEntry.options.hard ? false
+    chrome.tabs.query {windowId}, (tabs) ->
+      position = do ->
+        for tab, index in tabs
+          return index if tab.id == tabId
+      tabs = [tabs[position...]..., tabs[...position]...]
+      count = Math.min count, tabs.length
+      chrome.tabs.reload tab.id, {bypassCache} for tab in tabs[...count]
+
+forCountTabs = (count, currentTab, callback) ->
+  chrome.tabs.query {currentWindow: true}, (tabs) ->
+    activeTabIndex = currentTab.index
+    startTabIndex = Math.max 0, Math.min activeTabIndex, tabs.length - count
+    callback tab for tab in tabs[startTabIndex...startTabIndex + count]
 
 # Remove tabs before, after, or either side of the currently active tab
 removeTabsRelative = (direction, {tab: activeTab}) ->

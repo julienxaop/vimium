@@ -31,8 +31,9 @@ COPY_LINK_URL =
   indicator: "Copy link URL to Clipboard"
   linkActivator: (link) ->
     if link.href?
-      HUD.copyToClipboard link.href
       url = link.href
+      url = url[7..] if url[...7] == "mailto:"
+      HUD.copyToClipboard url
       url = url[0..25] + "...." if 28 < url.length
       HUD.showForDuration "Yanked #{url}", 2000
     else
@@ -52,7 +53,7 @@ availableModes = [OPEN_IN_CURRENT_TAB, OPEN_IN_NEW_BG_TAB, OPEN_IN_NEW_FG_TAB, O
 HintCoordinator =
   onExit: []
   localHints: null
-  suppressKeyboardEvents: null
+  cacheAllKeydownEvents: null
 
   sendMessage: (messageType, request = {}) ->
     Frame.postMessage "linkHintsMessage", extend request, {messageType}
@@ -60,15 +61,15 @@ HintCoordinator =
   prepareToActivateMode: (mode, onExit) ->
     # We need to communicate with the background page (and other frames) to initiate link-hints mode.  To
     # prevent other Vimium commands from being triggered before link-hints mode is launched, we install a
-    # temporary mode to block keyboard events.
-    @suppressKeyboardEvents = suppressKeyboardEvents = new SuppressAllKeyboardEvents
+    # temporary mode to block (and cache) keyboard events.
+    @cacheAllKeydownEvents = cacheAllKeydownEvents = new CacheAllKeydownEvents
       name: "link-hints/suppress-keyboard-events"
       singleton: "link-hints-mode"
       indicator: "Collecting hints..."
       exitOnEscape: true
     # FIXME(smblott) Global link hints is currently insufficiently reliable.  If the mode above is left in
     # place, then Vimium blocks.  As a temporary measure, we install a timer to remove it.
-    Utils.setTimeout 1000, -> suppressKeyboardEvents.exit() if suppressKeyboardEvents?.modeIsActive
+    Utils.setTimeout 1000, -> cacheAllKeydownEvents.exit() if cacheAllKeydownEvents?.modeIsActive
     @onExit = [onExit]
     @sendMessage "prepareToActivateMode",
       modeIndex: availableModes.indexOf(mode), isVimiumHelpDialog: window.isVimiumHelpDialog
@@ -103,10 +104,13 @@ HintCoordinator =
     hintDescriptors = [].concat (hintDescriptors[fId] for fId in (fId for own fId of hintDescriptors).sort())...
     # Ensure that the document is ready and that the settings are loaded.
     DomUtils.documentReady => Settings.onLoaded =>
-      @suppressKeyboardEvents.exit() if @suppressKeyboardEvents?.modeIsActive
-      @suppressKeyboardEvents = null
+      @cacheAllKeydownEvents.exit() if @cacheAllKeydownEvents?.modeIsActive
       @onExit = [] unless frameId == originatingFrameId
       @linkHintsMode = new LinkHintsMode hintDescriptors, availableModes[modeIndex]
+      # Replay keydown events which we missed (but for filtered hints only).
+      @cacheAllKeydownEvents?.replayKeydownEvents() if Settings.get "filterLinkHints"
+      @cacheAllKeydownEvents = null
+      @linkHintsMode # Return this (for tests).
 
   # The following messages are exchanged between frames while link-hints mode is active.
   updateKeyState: (request) -> @linkHintsMode.updateKeyState request
@@ -705,8 +709,9 @@ LocalHints =
         isClickable = true
         reason = "Open."
 
-    # Detect elements with "click" listeners installed with `addEventListener()`.
-    isClickable ||= element.hasAttribute "_vimium-has-onclick-listener"
+    # NOTE(smblott) Disabled pending resolution of #2997.
+    # # Detect elements with "click" listeners installed with `addEventListener()`.
+    # isClickable ||= element.hasAttribute "_vimium-has-onclick-listener"
 
     # An element with a class name containing the text "button" might be clickable.  However, real clickables
     # are often wrapped in elements with such class names.  So, when we find clickables based only on their
