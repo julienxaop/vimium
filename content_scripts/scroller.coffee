@@ -56,7 +56,12 @@ getDimension = (el, direction, amount) ->
 performScroll = (element, direction, amount) ->
   axisName = scrollProperties[direction].axisName
   before = element[axisName]
-  element[axisName] += amount
+  if typeof element.scrollBy is "function"
+    scrollArg = behavior: "instant"
+    scrollArg[if direction is "x" then "left" else "top"] = amount
+    element.scrollBy scrollArg
+  else
+    element[axisName] += amount
   element[axisName] != before
 
 # Test whether `element` should be scrolled. E.g. hidden elements should not be scrolled.
@@ -239,14 +244,16 @@ CoreScroller =
 # Scroller contains the two main scroll functions which are used by clients.
 Scroller =
   init: ->
-    handlerStack.push
-      _name: 'scroller/active-element'
-      DOMActivate: (event) -> handlerStack.alwaysContinueBubbling ->
+    handler = _name: 'scroller/active-element'
+    # Only Chrome has a DOMActivate event. On Firefox, we must listen for click. See #3287.
+    eventName = if Utils.isFirefox() then "click" else "DOMActivate"
+    handler[eventName] = (event) -> handlerStack.alwaysContinueBubbling ->
         # If event.path is present, the true event taget (potentially inside a Shadow DOM inside
         # event.target) can be found as its first element.
         # NOTE(mrmr1993): event.path has been renamed to event.deepPath in the spec, but this change is not
         # yet implemented by Chrome.
         activatedElement = event.deepPath?[0] ? event.path?[0] ? event.target
+    handlerStack.push handler
     CoreScroller.init()
     @reset()
 
@@ -322,6 +329,7 @@ specialScrollingElementMap =
   'twitter.com': 'div.permalink-container div.permalink[role=main]'
   'reddit.com': '#overlayScrollContainer'
   'new.reddit.com': '#overlayScrollContainer'
+  'www.reddit.com': '#overlayScrollContainer'
 
 root = exports ? (window.root ?= {})
 root.Scroller = Scroller

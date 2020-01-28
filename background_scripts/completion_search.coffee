@@ -48,12 +48,13 @@ CompletionSearch =
     xhr = new XMLHttpRequest()
     xhr.open "GET", url, true
     xhr.timeout = 2500
-    xhr.ontimeout = xhr.onerror = -> callback null
-    xhr.send()
-
+    # According to https://xhr.spec.whatwg.org/#request-error-steps,
+    # readystatechange always gets called whether a request succeeds or not,
+    # and the `readyState == 4` means an associated `state` is "done", which is true even if any error happens
     xhr.onreadystatechange = ->
       if xhr.readyState == 4
         callback if xhr.status == 200 then xhr else null
+    xhr.send()
 
   # Look up the completion engine for this searchUrl.  Because of DummyCompletionEngine, we know there will
   # always be a match.

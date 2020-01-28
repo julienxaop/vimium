@@ -381,8 +381,12 @@ class LinkHintsMode
           else
             clickActivator = (modifiers) -> (link) -> DomUtils.simulateClick link, modifiers
             linkActivator = @mode.linkActivator ? clickActivator @mode.clickModifiers
-            # TODO: Are there any other input elements which should not receive focus?
-            if clickEl.nodeName.toLowerCase() in ["input", "select"] and clickEl.type not in ["button", "submit"]
+            # Note(gdh1995): Here we should allow special elements to get focus,
+            # <select>: latest Chrome refuses `mousedown` event, and we can only
+            #     focus it to let user press space to activate the popup menu
+            # <object> & <embed>: for Flash games which have their own key event handlers
+            #     since we have been able to blur them by pressing `Escape` 
+            if clickEl.nodeName.toLowerCase() in ["input", "select", "object", "embed"]
               clickEl.focus()
             linkActivator clickEl
 
@@ -687,6 +691,8 @@ LocalHints =
                              (element.readOnly and DomUtils.isSelectable element))
       when "button", "select"
         isClickable ||= not element.disabled
+      when "object", "embed"
+        isClickable = true
       when "label"
         isClickable ||= element.control? and not element.control.disabled and
                         (@getVisibleClickable element.control).length == 0
@@ -722,8 +728,8 @@ LocalHints =
     # Elements with tabindex are sometimes useful, but usually not. We can treat them as second class
     # citizens when it improves UX, so take special note of them.
     tabIndexValue = element.getAttribute("tabindex")
-    tabIndex = if tabIndexValue == "" then 0 else parseInt tabIndexValue
-    unless isClickable or isNaN(tabIndex) or tabIndex < 0
+    tabIndex = if tabIndexValue then parseInt tabIndexValue else -1
+    unless isClickable or tabIndex < 0 or isNaN(tabIndex)
       isClickable = onlyHasTabIndex = true
 
     if isClickable
@@ -744,7 +750,14 @@ LocalHints =
   getLocalHints: (requireHref) ->
     # We need documentElement to be ready in order to find links.
     return [] unless document.documentElement
-    elements = document.documentElement.getElementsByTagName "*"
+    # Find all elements, recursing into shadow DOM if present.
+    getAllElements = (root, elements = []) ->
+      for element in root.querySelectorAll "*"
+        elements.push element
+        if element.shadowRoot
+          getAllElements(element.shadowRoot, elements)
+      elements
+    elements = getAllElements document.documentElement
     visibleElements = []
 
     # The order of elements here is important; they should appear in the order they are in the DOM, so that
@@ -778,34 +791,40 @@ LocalHints =
           false # This is not a false positive.
         element
 
-    # TODO(mrmr1993): Consider z-index. z-index affects behaviour as follows:
-    #  * The document has a local stacking context.
-    #  * An element with z-index specified
-    #    - sets its z-order position in the containing stacking context, and
-    #    - creates a local stacking context containing its children.
-    #  * An element (1) is shown above another element (2) if either
-    #    - in the last stacking context which contains both an ancestor of (1) and an ancestor of (2), the
-    #      ancestor of (1) has a higher z-index than the ancestor of (2); or
-    #    - in the last stacking context which contains both an ancestor of (1) and an ancestor of (2),
-    #        + the ancestors of (1) and (2) have equal z-index, and
-    #        + the ancestor of (1) appears later in the DOM than the ancestor of (2).
-    #
-    # Remove rects from elements where another clickable element lies above it.
+    # This loop will check if any corner or center of element is clickable
+    # document.elementFromPoint will find an element at a x,y location.
+    # Node.contain checks to see if an element contains another. note: someNode.contains(someNode) === true
+    # If we do not find our element as a descendant of any element we find, assume it's completely covered.
     localHints = nonOverlappingElements = []
     while visibleElement = visibleElements.pop()
-      rects = [visibleElement.rect]
-      for {rect: negativeRect} in visibleElements
-        # Subtract negativeRect from every rect in rects, and concatenate the arrays of rects that result.
-        rects = [].concat (rects.map (rect) -> Rect.subtract rect, negativeRect)...
-      if rects.length > 0
-        nonOverlappingElements.push extend visibleElement, rect: rects[0]
-      else
-        # Every part of the element is covered by some other element, so just insert the whole element's
-        # rect. Except for elements with tabIndex set (second class citizens); these are often more trouble
-        # than they're worth.
-        # TODO(mrmr1993): This is probably the wrong thing to do, but we don't want to stop being able to
-        # click some elements that we could click before.
-        nonOverlappingElements.push visibleElement unless visibleElement.secondClassCitizen
+      if visibleElement.secondClassCitizen
+        continue
+
+      rect = visibleElement.rect
+      element = visibleElement.element
+
+      # Check middle of element first, as this is perhaps most likely to return true.
+      elementFromMiddlePoint = document.elementFromPoint(rect.left + (rect.width * 0.5), rect.top + (rect.height * 0.5))
+      if elementFromMiddlePoint && (element.contains(elementFromMiddlePoint) or elementFromMiddlePoint.contains(element))
+        nonOverlappingElements.push visibleElement
+        continue
+
+      # If not in middle, try corners.
+      # Adjusting the rect by 0.1 towards the upper left, which empirically fixes some cases where another
+      # element would've been found instead. NOTE(philc): This isn't well explained. Originated in #2251.
+      verticalCoordinates = [rect.top + 0.1, rect.bottom - 0.1]
+      horizontalCoordinates = [rect.left + 0.1, rect.right - 0.1]
+
+      foundElement = false
+      for verticalCoordinate in verticalCoordinates
+        for horizontalCoordinate in horizontalCoordinates
+          elementFromPoint = document.elementFromPoint(verticalCoordinate, horizontalCoordinate)
+          if elementFromPoint && (element.contains(elementFromPoint) or elementFromPoint.contains(element))
+            foundElement = true
+            break
+        if foundElement
+          nonOverlappingElements.push visibleElement
+          break;
 
     # Position the rects within the window.
     {top, left} = DomUtils.getViewportTopLeft()

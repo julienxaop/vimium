@@ -5,22 +5,26 @@ DomUtils =
   documentReady: do ->
     [isReady, callbacks] = [document.readyState != "loading", []]
     unless isReady
-      window.addEventListener "DOMContentLoaded", onDOMContentLoaded = forTrusted ->
-        window.removeEventListener "DOMContentLoaded", onDOMContentLoaded
+      window.addEventListener "DOMContentLoaded", (onDOMContentLoaded = forTrusted ->
+        window.removeEventListener "DOMContentLoaded", onDOMContentLoaded, true
         isReady = true
         callback() for callback in callbacks
         callbacks = null
+      ), true
 
     (callback) -> if isReady then callback() else callbacks.push callback
 
   documentComplete: do ->
     [isComplete, callbacks] = [document.readyState == "complete", []]
     unless isComplete
-      window.addEventListener "load", onLoad = forTrusted ->
-        window.removeEventListener "load", onLoad
+      window.addEventListener "load", (onLoad = forTrusted (event) ->
+        # The target is ensured to be on document. See https://w3c.github.io/uievents/#event-type-load
+        return unless event.target == document
+        window.removeEventListener "load", onLoad, true
         isComplete = true
         callback() for callback in callbacks
         callbacks = null
+      ), true
 
     (callback) -> if isComplete then callback() else callbacks.push callback
 
@@ -286,7 +290,7 @@ DomUtils =
       element.dispatchEvent(mouseEvent)
 
   simulateClickDefaultAction: (element, modifiers = {}) ->
-    return unless element.tagName?.toLowerCase() == "a" and element.href?
+    return unless element.tagName?.toLowerCase() == "a" and element.href
 
     {ctrlKey, shiftKey, metaKey, altKey} = modifiers
 
@@ -405,15 +409,13 @@ DomUtils =
 
   getSelectionFocusElement: ->
     sel = window.getSelection()
-    if not sel.focusNode?
-      null
-    else if sel.focusNode == sel.anchorNode and sel.focusOffset == sel.anchorOffset
+    node = sel.focusNode
+    if not node?
+      return null
+    if node == sel.anchorNode and sel.focusOffset == sel.anchorOffset
       # The selection either *is* an element, or is inside an opaque element (eg. <input>).
-      sel.focusNode.childNodes[sel.focusOffset]
-    else if sel.focusNode.nodeType != sel.focusNode.ELEMENT_NODE
-      sel.focusNode.parentElement
-    else
-      sel.focusNode
+      node = node.childNodes[sel.focusOffset]
+    if node.nodeType != Node.ELEMENT_NODE then node.parentElement else node
 
   # Get the element in the DOM hierachy that contains `element`.
   # If the element is rendered in a shadow DOM via a <content> element, the <content> element will be
@@ -432,6 +434,16 @@ DomUtils =
       style.type = "text/css"
       style.textContent = Settings.get "userDefinedLinkHintCss"
       document.head.appendChild style
+
+  # Inject user Javascript.
+  injectUserScript: (text) ->
+    if text[...11] == "javascript:"
+      text = text[11...].trim()
+      if text.indexOf(" ") < 0
+        try text = decodeURIComponent text
+    script = document.createElement "script"
+    script.textContent = text
+    document.head.appendChild script
 
 root = exports ? (window.root ?= {})
 root.DomUtils = DomUtils

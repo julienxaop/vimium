@@ -5,7 +5,6 @@
 HUD =
   tween: null
   hudUI: null
-  _displayElement: null
   findMode: null
   abandon: -> @hudUI?.hide false
 
@@ -33,6 +32,7 @@ HUD =
   showFindMode: (@findMode = null) ->
     DomUtils.documentComplete =>
       @init()
+      @hudUI.toggleIframeElementClasses "vimiumUIComponentHidden", "vimiumUIComponentVisible"
       @hudUI.activate name: "showFindMode"
       @tween.fade 1.0, 150
 
@@ -92,7 +92,9 @@ HUD =
   copyToClipboard: (text) ->
     DomUtils.documentComplete =>
       @init()
-      @hudUI?.postMessage {name: "copyToClipboard", data: text}
+      # Chrome 74 only acknowledges text selection when a frame has been visible. See more in #3277 .
+      @hudUI.toggleIframeElementClasses "vimiumUIComponentHidden", "vimiumUIComponentVisible"
+      @hudUI.postMessage {name: "copyToClipboard", data: text}
 
   pasteFromClipboard: (@pasteListener) ->
     DomUtils.documentComplete =>
@@ -109,7 +111,11 @@ HUD =
     @pasteListener data
 
   unfocusIfFocused: ->
-    document.activeElement.blur() if document.activeElement == @hudUI?.iframeElement
+    # On Firefox, if an <iframe> disappears when it's focused, then it will keep "focused",
+    # which means keyboard events will always be dispatched to the HUD iframe
+    if @hudUI?.showing
+      @hudUI.iframeElement.blur()
+      window.focus()
 
 class Tween
   opacity: 0

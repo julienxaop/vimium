@@ -8,7 +8,13 @@ class UIComponent
 
   toggleIframeElementClasses: (removeClass, addClass) ->
     @iframeElement.classList.remove removeClass
-    @iframeElement.classList.add addClass
+    unless @iframeElement.classList.contains addClass
+      @iframeElement.classList.add addClass
+      if addClass == "vimiumUIComponentVisible"
+        # Force the re-computation of styles, so Chrome sends a visibility change message to the child frame.
+        # This is required to solve focusing issues since Chrome 74. See
+        # https://github.com/philc/vimium/pull/3277#issuecomment-487363284
+        getComputedStyle(@iframeElement).display
 
   constructor: (iframeUrl, className, @handleMessage) ->
     DomUtils.documentReady =>
@@ -27,7 +33,8 @@ class UIComponent
         seamless: "seamless"
       shadowWrapper = DomUtils.createElement "div"
       # PhantomJS doesn't support createShadowRoot, so guard against its non-existance.
-      @shadowDOM = shadowWrapper.createShadowRoot?() ? shadowWrapper
+      @shadowDOM = shadowWrapper.attachShadow?( mode: "open" ) ?
+        shadowWrapper.createShadowRoot?() ? shadowWrapper
       @shadowDOM.appendChild styleSheet
       @shadowDOM.appendChild @iframeElement
       @toggleIframeElementClasses "vimiumUIComponentVisible", "vimiumUIComponentHidden"
@@ -55,10 +62,11 @@ class UIComponent
                       @hide false
                     false # We will not be calling sendResponse.
                   # If this frame receives the focus, then hide the UI component.
-                  window.addEventListener "focus", (event) =>
+                  window.addEventListener "focus", (forTrusted (event) =>
                     if event.target == window and @options?.focus
                       @hide false
                     true # Continue propagating the event.
+                  ), true
                   # Set the iframe's port, thereby rendering the UI component ready.
                   setIframePort port1
                 when "setIframeFrameId" then @iframeFrameId = event.data.iframeFrameId
@@ -92,7 +100,7 @@ class UIComponent
                 handler: "sendMessageToFrames",
                 message: name: "focusFrame", frameId: @options.sourceFrameId, forceFocusThisFrame: true
             else
-              window.focus()
+              Utils.nextTick -> window.focus()
         @options = null
         @postMessage "hidden" # Inform the UI component that it is hidden.
 

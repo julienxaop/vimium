@@ -56,6 +56,7 @@ class PostFindMode extends SuppressPrintable
 class FindMode extends Mode
   @query:
     rawQuery: ""
+    parsedQuery: ""
     matchCount: 0
     hasResults: false
 
@@ -78,6 +79,7 @@ class FindMode extends Mode
     HUD.showFindMode this
 
   exit: (event) ->
+    HUD.unfocusIfFocused()
     super()
     FindMode.handleEscape() if event
 
@@ -218,8 +220,14 @@ class FindMode extends Mode
     FindMode.saveQuery()
 
   @findNext: (backwards) ->
+    # Bail out if we don't have any query text.
+    nextQuery = FindMode.getQuery backwards
+    unless nextQuery
+      HUD.showForDuration "No query to find.", 1000
+      return
+
     Marks.setPreviousPosition()
-    FindMode.query.hasResults = FindMode.execute null, {backwards}
+    FindMode.query.hasResults = FindMode.execute nextQuery, {backwards}
 
     if FindMode.query.hasResults
       focusFoundLink()

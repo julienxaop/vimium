@@ -119,8 +119,12 @@ class VomnibarUI
     else if (key == "down" ||
         (event.ctrlKey && (key == "j" || key == "n")))
       return "down"
+    else if (event.ctrlKey && event.key == "Enter")
+      return "ctrl-enter"
     else if (event.key == "Enter")
       return "enter"
+    else if event.key == "Delete" and event.shiftKey and not event.ctrlKey and not event.altKey
+      return "remove"
     else if KeyboardUtils.isBackspace event
       return "delete"
 
@@ -170,6 +174,12 @@ class VomnibarUI
       else
         completion = @completions[@selection]
         @hide -> completion.performAction openInNewTab
+    else if action == "ctrl-enter"
+      # Populate the vomnibar with the current selection's URL.
+      if not @customSearchMode? and @selection >= 0
+          @previousInputValue ?= @input.value
+          @input.value = @completions[@selection]?.url
+          @input.scrollLeft = @input.scrollWidth
     else if action == "delete"
       if @customSearchMode? and @input.selectionEnd == 0
         # Normally, with custom search engines, the keyword (e,g, the "w" of "w query terms") is suppressed.
@@ -183,6 +193,9 @@ class VomnibarUI
         @update true
       else
         return true # Do not suppress event.
+    else if action == "remove" and 0 <= @selection
+      completion = @completions[@selection]
+      console.log completion
 
     # It seems like we have to manually suppress the event here and still return true.
     event.stopImmediatePropagation()

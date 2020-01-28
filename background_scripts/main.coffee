@@ -98,15 +98,30 @@ do ->
 TabOperations =
   # Opens the url in the current tab.
   openUrlInCurrentTab: (request) ->
-    chrome.tabs.update request.tabId, url: Utils.convertToUrl request.url
+    if Utils.hasJavascriptPrefix request.url
+      {tabId, frameId} = request
+      chrome.tabs.sendMessage tabId, {frameId, name: "executeScript", script: request.url}
+    else
+      chrome.tabs.update request.tabId, url: Utils.convertToUrl request.url
 
   # Opens request.url in new tab and switches to it.
   openUrlInNewTab: (request, callback = (->)) ->
     tabConfig =
       url: Utils.convertToUrl request.url
-      index: request.tab.index + 1
       active: true
       windowId: request.tab.windowId
+    { position } = request
+
+    tabIndex = null
+    # TODO(philc): Convert to a switch statement ES6.
+    switch position
+      when "start" then tabIndex = 0
+      when "before" then tabIndex = request.tab.index
+      when "end" then tabIndex = null
+      # "after" is the default case when there are no options.
+      else tabIndex = request.tab.index + 1
+    tabConfig.index = tabIndex
+
     tabConfig.active = request.active if request.active?
     # Firefox does not support "about:newtab" in chrome.tabs.create.
     delete tabConfig["url"] if tabConfig["url"] == Settings.defaults.newTabUrl
@@ -131,7 +146,7 @@ TabOperations =
 toggleMuteTab = do ->
   muteTab = (tab) -> chrome.tabs.update tab.id, {muted: !tab.mutedInfo.muted}
 
-  ({tab: currentTab, registryEntry}) ->
+  ({tab: currentTab, registryEntry, tabId, frameId}) ->
     if registryEntry.options.all? or registryEntry.options.other?
       # If there are any audible, unmuted tabs, then we mute them; otherwise we unmute any muted tabs.
       chrome.tabs.query {audible: true}, (tabs) ->
@@ -139,10 +154,16 @@ toggleMuteTab = do ->
           tabs = (tab for tab in tabs when tab.id != currentTab.id)
         audibleUnmutedTabs = (tab for tab in tabs when tab.audible and not tab.mutedInfo.muted)
         if 0 < audibleUnmutedTabs.length
+          chrome.tabs.sendMessage tabId, {frameId, name: "showMessage", message: "Muting #{audibleUnmutedTabs.length} tab(s)."}
           muteTab tab for tab in audibleUnmutedTabs
         else
+          chrome.tabs.sendMessage tabId, {frameId, name: "showMessage", message: "Unmuting all muted tabs."}
           muteTab tab for tab in tabs when tab.mutedInfo.muted
     else
+      if currentTab.mutedInfo.muted
+        chrome.tabs.sendMessage tabId, {frameId, name: "showMessage", message: "Unmuted tab."}
+      else
+        chrome.tabs.sendMessage tabId, {frameId, name: "showMessage", message: "Muted tab."}
       muteTab currentTab
 
 #
@@ -197,9 +218,10 @@ BackgroundCommands =
       chrome.windows.create windowConfig, -> callback request
     else
       urls = request.urls[..].reverse()
+      position = request.registryEntry.options.position
       do openNextUrl = (request) ->
         if 0 < urls.length
-          TabOperations.openUrlInNewTab (extend request, {url: urls.pop()}), openNextUrl
+          TabOperations.openUrlInNewTab (extend request, {url: urls.pop(), position}), openNextUrl
         else
           callback request
   duplicateTab: mkRepeatCommand (request, callback) ->
@@ -322,6 +344,7 @@ Frames =
 
   registerFrame: ({tabId, frameId, port}) ->
     frameIdsForTab[tabId].push frameId unless frameId in frameIdsForTab[tabId] ?= []
+    (portsForTab[tabId] ?= {})[frameId] = port
 
   unregisterFrame: ({tabId, frameId, port}) ->
     # Check that the port trying to unregister the frame hasn't already been replaced by a new frame

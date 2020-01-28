@@ -16,10 +16,12 @@ normalMode = null
 windowIsFocused = do ->
   windowHasFocus = null
   DomUtils.documentReady -> windowHasFocus = document.hasFocus()
-  window.addEventListener "focus", forTrusted (event) ->
+  window.addEventListener "focus", (forTrusted (event) ->
     windowHasFocus = true if event.target == window; true
-  window.addEventListener "blur", forTrusted (event) ->
+  ), true
+  window.addEventListener "blur", (forTrusted (event) ->
     windowHasFocus = false if event.target == window; true
+  ), true
   -> windowHasFocus
 
 # This is set by Frame.registerFrameId(). A frameId of 0 indicates that this is the top frame in the tab.
@@ -34,6 +36,8 @@ bgLog = (args...) ->
 # If an input grabs the focus before the user has interacted with the page, then grab it back (if the
 # grabBackFocus option is set).
 class GrabBackFocus extends Mode
+  # console.log when we grab focus back from the page, so web devs using Vimium don't get confused.
+  logged: false
 
   constructor: ->
     exitEventHandler = =>
@@ -73,6 +77,9 @@ class GrabBackFocus extends Mode
 
   grabBackFocus: (element) ->
     return @continueBubbling unless DomUtils.isFocusable element
+    unless @logged or element == document.body
+      @logged = true
+      console.log "An auto-focusing action on this page was blocked by Vimium."
     element.blur()
     @suppressEvent
 
@@ -131,6 +138,8 @@ initializePreDomReady = ->
     runInTopFrame: ({sourceFrameId, registryEntry}) ->
       NormalModeCommands[registryEntry.command] sourceFrameId, registryEntry if DomUtils.isTopFrame()
     linkHintsMessage: (request) -> HintCoordinator[request.messageType] request
+    showMessage: (request) -> HUD.showForDuration request.message, 2000
+    executeScript: (request) -> DomUtils.injectUserScript request.script
 
   chrome.runtime.onMessage.addListener (request, sender, sendResponse) ->
     request.isTrusted = true
@@ -175,8 +184,8 @@ onFocus = forTrusted (event) ->
 
 # We install these listeners directly (that is, we don't use installListener) because we still need to receive
 # events when Vimium is not enabled.
-window.addEventListener "focus", onFocus
-window.addEventListener "hashchange", checkEnabledAfterURLChange
+window.addEventListener "focus", onFocus, true
+window.addEventListener "hashchange", checkEnabledAfterURLChange, true
 
 initializeOnDomReady = ->
   # Tell the background page we're in the domReady state.
@@ -197,13 +206,15 @@ Frame =
       Frame.postMessage "registerFrame"
     else
       postRegisterFrame = ->
-        window.removeEventListener "focus", focusHandler
-        window.removeEventListener "resize", resizeHandler
+        window.removeEventListener "focus", focusHandler, true
+        window.removeEventListener "resize", resizeHandler, true
         Frame.postMessage "registerFrame"
-      window.addEventListener "focus", focusHandler = forTrusted (event) ->
+      window.addEventListener "focus", (focusHandler = forTrusted (event) ->
         postRegisterFrame() if event.target == window
-      window.addEventListener "resize", resizeHandler = forTrusted (event) ->
+      ), true
+      window.addEventListener "resize", (resizeHandler = forTrusted (event) ->
         postRegisterFrame() unless DomUtils.windowIsTooSmall()
+      ), true
 
   init: ->
     @port = chrome.runtime.connect name: "frames"
@@ -214,7 +225,9 @@ Frame =
 
     # We disable the content scripts when we lose contact with the background page, or on unload.
     @port.onDisconnect.addListener disconnect = Utils.makeIdempotent => @disconnect()
-    window.addEventListener "unload", forTrusted disconnect
+    window.addEventListener "unload", (forTrusted (event) ->
+      disconnect() if event.target == window
+    ), true
 
   disconnect: ->
     try @postMessage "unregisterFrame"
@@ -225,17 +238,18 @@ Frame =
     HintCoordinator.exit isSuccess: false
     handlerStack.reset()
     isEnabledForUrl = false
-    window.removeEventListener "focus", onFocus
-    window.removeEventListener "hashchange", checkEnabledAfterURLChange
+    window.removeEventListener "focus", onFocus, true
+    window.removeEventListener "hashchange", checkEnabledAfterURLChange, true
 
 setScrollPosition = ({ scrollX, scrollY }) ->
   DomUtils.documentReady ->
     if DomUtils.isTopFrame()
-      window.focus()
-      document.body.focus()
-      if 0 < scrollX or 0 < scrollY
-        Marks.setPreviousPosition()
-        window.scrollTo scrollX, scrollY
+      Utils.nextTick ->
+        window.focus()
+        document.body.focus()
+        if 0 < scrollX or 0 < scrollY
+          Marks.setPreviousPosition()
+          window.scrollTo scrollX, scrollY
 
 flashFrame = do ->
   highlightedFrameElement = null
@@ -245,7 +259,10 @@ flashFrame = do ->
       # Create a shadow DOM wrapping the frame so the page's styles don't interfere with ours.
       highlightedFrameElement = DomUtils.createElement "div"
       # PhantomJS doesn't support createShadowRoot, so guard against its non-existance.
-      _shadowDOM = highlightedFrameElement.createShadowRoot?() ? highlightedFrameElement
+      # https://hacks.mozilla.org/2018/10/firefox-63-tricks-and-treats/ says
+      # Firefox 63 has enabled Shadow DOM v1 by default
+      _shadowDOM = highlightedFrameElement.attachShadow?( mode: "open" ) ?
+        highlightedFrameElement.createShadowRoot?() ? highlightedFrameElement
 
       # Inject stylesheet.
       _styleSheet = DomUtils.createElement "style"
@@ -271,11 +288,12 @@ focusThisFrame = (request) ->
       # next frame instead.  This affects sites like Google Inbox, which have many tiny iframes. See #1317.
       chrome.runtime.sendMessage handler: "nextFrame"
       return
-  window.focus()
-  # On Firefox, window.focus doesn't always draw focus back from a child frame (bug 554039).
-  # We blur the active element if it is an iframe, which gives the window back focus as intended.
-  document.activeElement.blur() if document.activeElement.tagName.toLowerCase() == "iframe"
-  flashFrame() if request.highlight
+  Utils.nextTick ->
+    window.focus()
+    # On Firefox, window.focus doesn't always draw focus back from a child frame (bug 554039).
+    # We blur the active element if it is an iframe, which gives the window back focus as intended.
+    document.activeElement.blur() if document.activeElement.tagName.toLowerCase() == "iframe"
+    flashFrame() if request.highlight
 
 # Used by focusInput command.
 root.lastFocusedInput = do ->
